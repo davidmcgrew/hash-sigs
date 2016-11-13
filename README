@@ -1,0 +1,136 @@
+README for the hash-sigs package: an implementation of the
+Leighton-Micali Hierarchical Signature System (HSS).
+
+
+Introduction
+
+This package contains an experimental implementation of the hash-based
+digital signatures algorithm specified in the Internet Draft
+draft-mcgrew-hash-sigs-05.txt, intended for the purposes of
+understanding that specification and gaining practical experience
+working with hash based signatures.  It is NOT intended for use in
+security critical applications.  The implementation aims for
+readability over other criteria such as performance or fully
+exploiting the Python language.
+
+Please see the security considerations section of the draft, and note
+that private key files MUST NOT be copied and MUST NOT be cloned as
+part of a Virtual Machine snapshot (either a full snapshot or a volume
+snapshot), or else security may be lost.  The application checks to
+see if private key files have been accidentially copied, but these
+checks cannot detect VM cloning.
+
+
+Contents
+
+   hss.py  - a Python 2.7.3 implementation of the HSS scheme
+   test/   - a subdirectory with a test script and test files
+   LICENSE - stuff for lawyers
+   AUTHORS - contributors
+   README  - this file
+
+
+Requirements
+
+   - a Python interpreter version 2.7.3 or greater
+   - the pycrypto package (https://pypi.python.org/pypi/pycrypto)
+
+
+Usage
+
+The hss.py program can generate public/private keypairs, sign files,
+and verify signatures on files, as well as perform automated testing
+and read and pretty-print keys and signatures.  It uses detached
+signatures, that is, the signature of a file with the path <name> is
+written to a separate file with the path <name>.sig.  Public and
+private keys are stored in files named <keyname>.pub and
+<keyname>.prv, respectively, where <keyname> is a string provided to
+the key generation process.  The suffixes .sig, .pub, and .prv MUST be
+present in order for hss.py to correctly process the files.  This
+convention ensures that the file formats exactly match the draft
+specification, for clarity's sake.
+
+hss.py expects that its first argument will be one of these commands:
+
+   - genkey, to generate one or more public private keypairs,
+   - sign, to sign one or more files,
+   - verify, to verify one or more files,
+   - read, to read and pretty-print one or more files,
+   - test, to perform automated algorithmic consistency checks.
+
+The syntax of these commands is shown by the usage statement:
+
+hss.py genkey <name>
+   creates <name>.prv and <name>.pub
+
+hss.py sign <file> [ <file2> ... ] <prvname>
+   updates <prvname>, then writes signature of <file> to <file>.sig
+
+hss.py verify <pubname> <file> [ <file2> ... ]
+   verifies file using public key
+
+hss.py read <file> [ <file2> ... ]
+   read and pretty-print .sig, .pub, .prv file(s)
+
+hss.py test [all | hss | lms | lmots | checksum ]
+   performs algorithm tests
+
+
+Testing
+
+The hss.py test command performs several automated tests, including
+consistency checking (signing then verifying) with valid signatures,
+sanity checks on invalid signatures, checks that verify that private
+keys cannot be overused, and fuzz-testing style checks that mangle
+signatures and private keys.  These checks are performed on all of the
+signature components in the HSS draft: LMOTS, LMS, and HSS.
+
+To test the command-line functionality of hss.py, the bash script
+hss-test.sh in the test/ subdirectory generates a keypair, signs a set
+of files, verifies the signatures, and then generates a set of 'dump'
+files containing the pretty-printed format.  
+
+
+Public key and signature formats
+
+With the read command, hss.py will print out a signature or public key
+file in a human-readable format.  This can be useful as a way to
+understand how the different data elements are serialized into byte
+strings.  An example of the output of the read command is: 
+
+--------------------------------------------
+HSS public key
+levels-1    00000001
+--------------------------------------------
+LMS public key
+LMS type    00000001                         # LMS_SHA256_M32_H5
+LMOTS_type  00000004                         # LMOTS_SHA256_N32_W8
+I           968ae04d83fc24cb75a96a474dab0590
+            13ba92228a856eb715861f5cfb9782bc
+            16d2512cdeb85bf080a9fae16b56cbfc
+            710bf44b69fef6bec99a35eaec062c27
+K           be9d1745e370334297aaf05fcefa2c84
+            9fe41c59b3321f883f54c9620a11d959
+--------------------------------------------
+--------------------------------------------
+
+The middle column contains a hexadecimal string that corresponds to
+the byte string of the object, when read from left to right and top to
+bottom.  That is, if hexdump -C is run on the same file, it would
+reveal that the object is the hex string 
+
+   000000010000000100000004968ae04d83fc24cb75a96a474dab0590 ...
+
+The left-hand column contains the names of the variables that
+correspond to the byte strings in the middle column.  The rightmost
+column contains the symbolic identifier associated with the typecodes.
+
+Each object starts with a descriptive name, e.g. "HSS public key",
+"LMS public key", and each object is surrounded by dashed lines.
+These lines illustrate how one object can contain another, such as how
+the LMS public key is contained in the HSS public key in the example
+above.
+
+
+
+
