@@ -466,7 +466,7 @@ class LmsPrivateKey(object):
     Leighton-Micali Signature Private Key
     """
     def __init__(self, lms_type=lms_sha256_m32_h10, lmots_type=lmots_sha256_n32_w8,
-                 SEED=None, I=None, q=0, nodes=None, pub=None):
+                 SEED=None, I=None, qinit=0, nodes=None, pub=None):
         n, p, w, ls = lmots_params[lmots_type]
         m, h, LenI = lms_params[lms_type]
         self.lms_type = lms_type
@@ -494,11 +494,10 @@ class LmsPrivateKey(object):
                 ots_pub = ots_priv.get_public_key()
                 self.priv.append(ots_priv)
                 self.pub.append(ots_pub)
-                self.leaf_num = 0
         else:
             self.nodes = nodes
             self.pub = pub
-            self.leaf_num = q
+        self.leaf_num = qinit
         self.nodes = {}
         self.lms_pub_value = self.T(1)
 
@@ -738,12 +737,14 @@ class HssPrivateKey(object):
     """
     Hierarchical Signature System Private Key
     """
-    def __init__(self, levels=2, lms_type=lms_sha256_m32_h5, lmots_type=lmots_sha256_n32_w8, SEED=None, I=None):
+    def __init__(self, levels=2, lms_type=lms_sha256_m32_h5, lmots_type=lmots_sha256_n32_w8, SEED=None, I=None, prv0=None):
         self.levels = levels
         self.prv = list()
         self.pub = list()
         self.sig = list()
-        self.prv.append(LmsPrivateKey(lms_type=lms_type, lmots_type=lmots_type, SEED=SEED, I=I))
+        if prv0 is None:
+            prv0 = LmsPrivateKey(lms_type=lms_type, lmots_type=lmots_type, SEED=SEED, I=I)
+        self.prv.append(prv0)
         self.pub.append(self.prv[0].get_public_key())
         for i in xrange(1, self.levels):
             self.prv.append(LmsPrivateKey(lms_type=lms_type, lmots_type=lmots_type))
@@ -784,7 +785,7 @@ class HssPrivateKey(object):
     def deserialize(cls, buffer):
         levels = deserialize_u32(buffer[0:4])
         prv = LmsPrivateKey.deserialize(buffer[4:])
-        return cls(levels, lms_type=prv.lms_type, lmots_type=prv.lmots_type, SEED=prv.SEED, I=prv.I)
+        return cls(levels, lms_type=prv.lms_type, lmots_type=prv.lmots_type, SEED=prv.SEED, I=prv.I, prv0=prv)
 
     @classmethod
     def deserialize_print_hex(cls, buffer):
