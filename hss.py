@@ -319,7 +319,7 @@ class LmotsPrivateKey:
     def print_hex(self):
         PrintUtl.print_line()
         print "LMOTS private key"
-        PrintUtl.print_hex("LMS type", u32str(self.type), lms_name[self.type])
+        PrintUtl.print_hex("LMOTS type", u32str(self.type), lmots_name[self.type])
         PrintUtl.print_hex("S", self.S)
         for i, x in enumerate(self.x):
             PrintUtl.print_hex("x[" + str(i) + "]", x)
