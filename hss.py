@@ -69,8 +69,28 @@ def err_handle(err):
 
 # return codes
 #
-INVALID = 0
-VALID   = 1
+VALID                  = 0
+INVALID                = 1
+
+# informative return codes for debugging 
+#
+INVALID_LMS_TYPE_ERR   = 2
+INVALID_LMS_PUB_ERR    = 3
+INVALID_HSS_LEVEL_ERR  = 4
+INVALID_WITH_REASON    = 5
+
+retcode_dict = {
+    INVALID_LMS_TYPE_ERR:  "error: LMS typecode mismatch",
+    INVALID_LMS_PUB_ERR:   "error: LMS public key mismatch",
+    INVALID_HSS_LEVEL_ERR: "error: HSS level mismatch",
+    INVALID_WITH_REASON:   "error: exception"
+}
+
+def retcode_get_string(x):
+    if x in retcode_dict:
+        return retcode_dict[x]
+    else:
+        return "unknown error"
 
 # Diversification constants
 #
@@ -105,24 +125,27 @@ lmots_name = {
 
 # LMS typecodes and parameters
 #
-lms_sha256_m32_h5  = 0x00000001
-lms_sha256_m32_h10 = 0x00000002
-lms_sha256_m32_h15 = 0x00000003
-lms_sha256_m32_h20 = 0x00000004
+lms_sha256_m32_h5  = 0x00000005
+lms_sha256_m32_h10 = 0x00000006
+lms_sha256_m32_h15 = 0x00000007
+lms_sha256_m32_h20 = 0x00000008
+lms_sha256_m32_h25 = 0x00000009
 
 lms_params = {
     #                    m,  h,  LenI
     lms_sha256_m32_h5:  (32, 5,  64), 
     lms_sha256_m32_h10: (32, 10, 64), 
     lms_sha256_m32_h15: (32, 15, 64), 
-    lms_sha256_m32_h20: (32, 20, 64)
+    lms_sha256_m32_h20: (32, 20, 64),
+    lms_sha256_m32_h25: (32, 25, 64)
 }
 
 lms_name = {
     lms_sha256_m32_h5:  "LMS_SHA256_M32_H5", 
     lms_sha256_m32_h10: "LMS_SHA256_M32_H10", 
     lms_sha256_m32_h15: "LMS_SHA256_M32_H15", 
-    lms_sha256_m32_h20: "LMS_SHA256_M32_H20"
+    lms_sha256_m32_h20: "LMS_SHA256_M32_H20",
+    lms_sha256_m32_h25: "LMS_SHA256_M32_H25"
 }
 
 # ***************************************************************
@@ -264,20 +287,19 @@ class LmotsPrivateKey:
     """
     # Algorithm 0: Generating an LMOTS Private Key
     #
-    def __init__(self, S=None, xq=None, lmots_type=lmots_sha256_n32_w8):   
+    def __init__(self, S=None, SEED=None, lmots_type=lmots_sha256_n32_w8):   
         n, p, w, ls = lmots_params[lmots_type]
         if S is None:
             self.S = entropySource.read(n)
         else:
             self.S = S
         self.x = list()
-        if xq is None:
+        if SEED is None:
             for i in xrange(0, p):
                 self.x.append(entropySource.read(n))
         else:
             for i in xrange(0, p):
-                self.x.append(xq)
-                xq = H(self.S + xq + u16str(i+1) + D_PRG)
+                self.x.append(H(self.S + SEED + u16str(i+1) + D_PRG))
         self.type = lmots_type
         self._signatures_remaining = 1
 
@@ -410,54 +432,57 @@ def lmots_sig_to_pub(sig, S, lmots_type, message):
 #                                                               |
 #               LMS N-time signatures functions                 |
 #                                                               |
-#           h = 10 # height (number of levels -1) of tree       |
 # ***************************************************************
 
 def serialize_lms_sig(typecode, q, lmots_sig, path):
-    return u32str(typecode) + u32str(q) + lmots_sig + serialize_array(path)
+    return u32str(q) + lmots_sig + u32str(typecode) + serialize_array(path)
 
 def deserialize_lms_sig(buffer):
-    lms_type = typecode_peek(buffer[0:4])
+    q = deserialize_u32(buffer[0:4])
+    # print "q: " + str(q)
+    lmots_type = typecode_peek(buffer[4:8])
+    # print "lmots_type: " + str(lmots_type)
+    if lmots_type in lmots_params:
+        pos = 4 + LmotsSignature.bytes(lmots_type)
+    else:
+        raise ValueError(err_unknown_typecode, str(lmots_type))
+    lmots_sig = buffer[4:pos]
+    lms_type = typecode_peek(buffer[pos:pos+4])
     if lms_type in lms_params:
         m, h, LenI = lms_params[lms_type]
     else:
         raise ValueError(err_unknown_typecode, str(lms_type))
-    q = deserialize_u32(buffer[4:8])
     if (q >= 2**h):
         raise ValueError(err_bad_value)
-    lmots_type = typecode_peek(buffer[8:12])
-    if lmots_type in lmots_params:
-        pos = 8 + LmotsSignature.bytes(lmots_type)
-    else:
-        raise ValueError(err_unknown_typecode, str(lmots_type))
-    lmots_sig = buffer[8:pos]
+    pos = pos + 4
     path = list()
     for i in xrange(0, h):
         path.append(buffer[pos:pos+m])
         pos = pos + m
+    # PrintUtl.print_hex("buffer tail", buffer[pos:])
     return lms_type, q, lmots_sig, path
 
 def parse_lms_sig(buffer):
-    lms_type = typecode_peek(buffer[0:4])
+    lmots_type = typecode_peek(buffer[4:8])
+    if lmots_type in lmots_params:
+        pos = 4 + LmotsSignature.bytes(lmots_type)
+    else:
+        raise ValueError(err_unknown_typecode)
+    lms_type = typecode_peek(buffer[pos:pos+4])
     if lms_type in lms_params:
         m, h, LenI = lms_params[lms_type]
     else:
         raise ValueError(err_unknown_typecode)
-    lmots_type = typecode_peek(buffer[8:12])
-    if lmots_type in lmots_params:
-        pos = 8 + LmotsSignature.bytes(lmots_type)
-    else:
-        raise ValueError(err_unknown_typecode)
-    pos = pos + h*m
+    pos = pos + 4 + h*m
     return buffer[0:pos], buffer[pos:]
 
 def print_lms_sig(sig):
     PrintUtl.print_line()
     print "LMS signature"
     lms_type, q, lmots_sig, path = deserialize_lms_sig(sig)
-    PrintUtl.print_hex("LMS type", u32str(lms_type), lms_name[lms_type])
     PrintUtl.print_hex("q", u32str(q))
     LmotsSignature.deserialize(lmots_sig).print_hex()
+    PrintUtl.print_hex("LMS type", u32str(lms_type), lms_name[lms_type])
     for i, e in enumerate(path):
         PrintUtl.print_hex("path[" + str(i) + "]", e)
 
@@ -489,8 +514,7 @@ class LmsPrivateKey(object):
         if nodes is None:
             for q in xrange(0, 2**h):
                 S = self.I + u32str(q)
-                xq0 = H(S + SEED + u16str(0) + D_PRG)
-                ots_priv = LmotsPrivateKey(S=S, xq=xq0, lmots_type=lmots_type)
+                ots_priv = LmotsPrivateKey(S=S, SEED=SEED, lmots_type=lmots_type)
                 ots_pub = ots_priv.get_public_key()
                 self.priv.append(ots_priv)
                 self.pub.append(ots_pub)
@@ -633,7 +657,7 @@ class LmsPublicKey(object):
         lms_type, q, lmots_sig, path = deserialize_lms_sig(sig)
         node_num = q + 2**h
         if lms_type != self.lms_type:
-            return INVALID
+            return INVALID_LMS_TYPE_ERR
         pathvalue = iter(path)
         tmp = lmots_sig_to_pub(lmots_sig, self.I + u32str(q), self.lmots_type, message)
         tmp = H(self.I + tmp + u32str(node_num) + D_LEAF)
@@ -646,7 +670,7 @@ class LmsPublicKey(object):
         if (tmp == self.value):
             return VALID
         else:
-            return INVALID
+            return INVALID_LMS_PUB_ERR
 
     def serialize(self):
         return u32str(self.lms_type) + u32str(self.lmots_type) + self.I + self.value
@@ -694,9 +718,9 @@ class LmsPublicKey(object):
 #   signature                                                   |
 # ***************************************************************
 
-def serialize_hss_sig(levels, publist, siglist, msg_sig):
-    result = u32str(levels)
-    for i in xrange(0, levels-1):
+def serialize_hss_sig(levels_minus_one, publist, siglist, msg_sig):
+    result = u32str(levels_minus_one)
+    for i in xrange(0, levels_minus_one):
         result = result + siglist[i]
         result = result + publist[i+1].serialize()
     result = result + msg_sig
@@ -704,7 +728,7 @@ def serialize_hss_sig(levels, publist, siglist, msg_sig):
 
 def deserialize_hss_sig(buffer):
     hss_max_levels = 8
-    levels = deserialize_u32(buffer[0:4])
+    levels = deserialize_u32(buffer[0:4]) + 1
     if (levels > hss_max_levels):
         raise ValueError(err_bad_value)
     siglist = list()
@@ -723,7 +747,7 @@ def print_hss_sig(sig):
     levels, publist, siglist, lms_sig = deserialize_hss_sig(sig)
     PrintUtl.print_line()
     print "HSS signature"
-    PrintUtl.print_hex("L-1", u32str(levels))
+    PrintUtl.print_hex("Nspk", u32str(levels-1))
     for i in xrange(0, levels-1):
         print "sig[" + str(i) + "]: " 
         print_lms_sig(siglist[i])
@@ -767,7 +791,7 @@ class HssPrivateKey(object):
 
         # sign message 
         lms_sig = self.prv[-1].sign(message)
-        return serialize_hss_sig(self.levels, self.pub, self.sig, lms_sig)    
+        return serialize_hss_sig(self.levels-1, self.pub, self.sig, lms_sig)    
 
     def get_public_key(self):
         return HssPublicKey(self.prv[0].get_public_key(), self.levels)
@@ -817,8 +841,8 @@ class HssPrivateKey(object):
     @classmethod
     def get_param_list(cls):
         param_list = list()
-        for x in [ 1 ]: # lmots_params.keys():
-            for y in [ 1 ]: # lms_params.keys():
+        for x in [ lmots_sha256_n32_w1 ]: # lmots_params.keys():
+            for y in [ lms_sha256_m32_h5 ]: # lms_params.keys():
                 for l in [2,3]:
                     param_list.append({'lmots_type':x, 'lms_type':y, 'levels':l})
         return param_list
@@ -840,35 +864,36 @@ class HssPublicKey(object):
         try:
             levels, publist, siglist, lms_sig = deserialize_hss_sig(sig)
             if levels != self.levels:
-                return INVALID
+                return INVALID_HSS_LEVEL_ERR
 
             # verify the chain of signed public keys
             key = self.pub1
             for i in xrange(0, self.levels-1):
                 sig = siglist[i]
                 msg = publist[i]
-                if (key.verify(msg, sig) != 1):
-                    return INVALID
+                result = key.verify(msg, sig)
+                if (result != VALID):
+                    return result
                 key = LmsPublicKey.deserialize(msg)
             return key.verify(message, lms_sig)  
 
         except ValueError as err:
             if err.args[0] in err_list:
-                return INVALID
+                return INVALID_WITH_REASON
 
     def serialize(self):
-        return u32str(self.levels-1) + self.pub1.serialize()
+        return u32str(self.levels) + self.pub1.serialize()
 
     @classmethod
     def deserialize(cls, buffer):
-        levels = deserialize_u32(buffer[0:4]) + 1
+        levels = deserialize_u32(buffer[0:4])
         rootpub = LmsPublicKey.deserialize(buffer[4:])
         return cls(rootpub, levels)
 
     def print_hex(self):
         PrintUtl.print_line()
         print "HSS public key"
-        PrintUtl.print_hex("levels-1", u32str(self.levels-1))
+        PrintUtl.print_hex("levels", u32str(self.levels))
         self.pub1.print_hex()
         PrintUtl.print_line()
 
@@ -989,14 +1014,17 @@ def ntimesig_test_param(private_key_class, param, verbose=False):
 
         print "signature byte length: " + str(len(sig))
         if verbose:
-            LmotsSignature.deserialize(sig).print_hex()
+            # note: we need an lmsSignature class to enable printing here
+            # LmotsSignature.deserialize(sig).print_hex()
+            # print_lms_sig(sig)
             print "num_signatures_remaining: " + str(private_key.num_signatures_remaining())
         
         print "true positive test: ", 
-        if (public_key.verify(testmessage, sig) == VALID):
+        result = public_key.verify(testmessage, sig)
+        if (result == VALID):
             print "passed: message/signature pair is valid as expected"
         else:
-            print "failed: message/signature pair is invalid"
+            print "failed: message/signature pair is invalid (" + retcode_get_string(result) + ")"
             sys.exit()
 
         print "false positive test: ", 
@@ -1041,7 +1069,7 @@ def ntimesig_test_param(private_key_class, param, verbose=False):
                 errdict[err.args[0]] = errdict.get(err.args[0], 0) + 1
     print "error counts:"
     for errkey in errdict:
-        print "\t" + errkey.ljust(40) + str(errdict[errkey])
+        print "\t" + errkey.ljust(40)[7:] + str(errdict[errkey])
     print "passed"
     
     print "mangled public key parse test",
@@ -1061,7 +1089,7 @@ def ntimesig_test_param(private_key_class, param, verbose=False):
                 errdict[err.args[0]] = errdict.get(err.args[0], 0) + 1
     print "error counts:"
     for errkey in errdict:
-        print "\t" + errkey.ljust(40) + str(errdict[errkey])
+        print "\t" + errkey.ljust(40)[7:] + str(errdict[errkey])
     print "passed"
 
 # ***************************************************************
@@ -1162,9 +1190,9 @@ if __name__ == "__main__":
         if test_lmots:
             ntimesig_test(LmotsPrivateKey, verbose=False)
         if test_lms:
-            ntimesig_test(LmsPrivateKey, verbose=False)
+            ntimesig_test(LmsPrivateKey, verbose=True)
         if test_hss:
-            ntimesig_test(HssPrivateKey, verbose=False)
+            ntimesig_test(HssPrivateKey, verbose=True)
 
     if sys.argv[1] == "genkey":
         if len(sys.argv) >= 3:
@@ -1236,10 +1264,11 @@ if __name__ == "__main__":
             sig = sigfile.read()
             msgfile = open(msgname, 'r')
             msg = msgfile.read()
-            if (pub.verify(msg, sig) == 1):
+            result = pub.verify(msg, sig)
+            if (result == VALID):
                 print "VALID"
             else:
-                print "INVALID"
+                print "INVALID (" + retcode_get_string(result) + ")"
 
     if sys.argv[1] == "read":
         if (len(sys.argv) < 3):
@@ -1255,4 +1284,9 @@ if __name__ == "__main__":
                 HssPublicKey.deserialize(buf).print_hex()
             elif ".prv" in f:
                 # strip check string from start of buffer
-                HssPrivateKey.deserialize_print_hex(buf[32:]) 
+                HssPrivateKey.deserialize_print_hex(buf[32:])
+            else:                
+                PrintUtl.print_line()
+                PrintUtl.print_hex("Message", buf)
+                PrintUtl.print_line()
+
