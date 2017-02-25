@@ -76,6 +76,13 @@ hss.py test [all | hss | lms | lmots | checksum ]
    performs algorithm tests
 
 
+As hss.py is an executable file, it has the path to its python
+interpreter hardcoded as /usr/bin/python.  To run the program when the
+python interpreter is in another location on the filesystem, use the
+command 'python hss.py' instead of 'hss.py', followed by the arguments
+as above, or edit the path as needed.  
+
+
 Testing
 
 The hss.py test command performs several automated tests, including
